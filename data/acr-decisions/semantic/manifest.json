@@ -1,0 +1,13 @@
+{
+  "provider": "google-gemini",
+  "model": "gemini-embedding-001",
+  "taskTypeDocument": "RETRIEVAL_DOCUMENT",
+  "dim": 3072,
+  "createdAt": "2026-05-14T14:13:44.061Z",
+  "sourceDir": "data/acr-decisions/text",
+  "totalFiles": 638,
+  "indexed": 638,
+  "skipped": 0,
+  "errors": 0,
+  "outputDimensionality": null
+}

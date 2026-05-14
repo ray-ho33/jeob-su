@@ -1,0 +1,8 @@
+{
+  "source": "law.go.kr DRF target=acr (국민권익위원회 결정문)",
+  "totalCntReported": 638,
+  "uniqueIds": 638,
+  "downloaded": 538,
+  "skippedExisting": 100,
+  "outputDir": "/Users/hansangho/Documents/Projects/jeob-su/data/acr-decisions"
+}
