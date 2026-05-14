@@ -2,19 +2,57 @@
 
 국민권익위원회 의결례를 **법제처 Open API**로 내려받고, **Google Gemini 임베딩**으로 색인한 뒤, 민원·사실관계 텍스트와 **의미적으로 유사한** 과거 결정문을 찾는 **Node.js 스크립트** 모음입니다.
 
-> **법률 자문이 아닙니다.** 코퍼스 범위 안에서 참고용 유사 사례를 빠르게 찾는 도구로만 사용하세요.
+> **법률 자문이 아닙니다.** 이 저장소에 들어 있는 결정문 범위 안에서 참고용 유사 사례를 빠르게 찾는 도구로만 사용하세요.
 
 ---
 
 ## 무엇을 하나요
 
-| 단계 | 설명 | 스크립트 |
-|------|------|----------|
-| 1. 자료 모으기 | `AcrService` 의결서를 JSON으로 저장 | [`scripts/download-acr-decisions.mjs`](scripts/download-acr-decisions.mjs) |
-| 2. 색인 | 검색용 필드를 묶어 `embedContent`(문서용)로 벡터화 후 저장 | [`scripts/build-acr-semantic-index.mjs`](scripts/build-acr-semantic-index.mjs) |
-| 3. 검색 | 질의를 `embedContent`(질의용)로 벡터화하고 코사인 유사도 Top-K | [`scripts/query-acr-semantic.mjs`](scripts/query-acr-semantic.mjs) |
+
+| 단계        | 설명                                           | 스크립트                                                                           |
+| --------- | -------------------------------------------- | ------------------------------------------------------------------------------ |
+| 1. 자료 모으기 | `AcrService` 의결서를 JSON으로 저장                  | `[scripts/download-acr-decisions.mjs](scripts/download-acr-decisions.mjs)`     |
+| 2. 색인     | 검색용 필드를 묶어 `embedContent`(문서용)로 벡터화 후 저장     | `[scripts/build-acr-semantic-index.mjs](scripts/build-acr-semantic-index.mjs)` |
+| 3. 검색     | 질의를 `embedContent`(질의용)로 벡터화하고 코사인 유사도 Top-K | `[scripts/query-acr-semantic.mjs](scripts/query-acr-semantic.mjs)`             |
+
 
 색인에 넣는 텍스트는 결정문의 **제목, 민원표시, 결정요지, 주문, 이유(상한 자름)** 를 조합합니다.
+
+---
+
+## 시맨틱 검색·임베딩이 뭔가요?
+
+### 시맨틱 검색이란
+
+**키워드 검색**은 글에 특정 단어가 들어 있는지를 본다. 예를 들어 “육교”라고만 찾으면, 표현이 “횡단시설”이나 “통학로 안전”으로만 적힌 결정문은 잘 안 걸릴 수 있다.
+
+**시맨틱(의미 기반) 검색**은 단어가 완전히 같지 않아도, **말하는 내용·상황이 비슷한지**를 기준으로 가까운 문서를 찾는 방식이다. 민원을 한 줄로 적어 넣었을 때, 과거 의결례 중 **비슷한 쟁점·사실관계**가 담긴 것부터 순서대로 나오게 만드는 것이 이 저장소의 목적이다.
+
+### 임베딩(embedding)이란
+
+컴퓨터는 글을 그대로 “비교”하기 어렵다. 그래서 **한 덩어리의 글을, 고정 길이의 숫자 나열(벡터)** 로 바꾼 것을 **임베딩**이라고 부른다.
+
+비유하자면, 글마다 **많은 차원을 가진 좌표**를 하나씩 받는다고 생각하면 된다. 의미가 비슷한 글은 그 좌표가 **비슷한 방향**을 향하는 경향이 있다. 반대로 전혀 다른 주제는 다른 방향에 놓인다. 이 좌표는 사람이 손으로 적는 것이 아니라, **Gemini 같은 임베딩 모델**이 문장 전체를 읽고 자동으로 만든다.
+
+### 이 프로젝트에서 Gemini가 하는 일
+
+1. **색인(의결례 쪽)**
+  각 결정문 JSON에서 검색에 쓸 본문을 만든다(위 표의 **제목·민원표시·결정요지·주문·이유**를 이어 붙인 텍스트). 이 텍스트를 Google의 `**embedContent` API**에 보낸다.  
+   모델은 기본적으로 `**gemini-embedding-001`** 을 쓰며, 이때 요청 종류를 `**RETRIEVAL_DOCUMENT**` 로 둔다. 이름 그대로 “나중에 찾아볼 **문서** 묶음”에 넣기 좋게 벡터를 뽑으라는 힌트다. 나온 벡터를 `data/acr-decisions/semantic/index.json`에 저장해 두면, 매번 결정문 전체를 API에 다시 보내지 않고도 검색할 수 있다.
+2. **검색(민원·질문 쪽)**
+  사용자가 입력한 민원 한 줄(또는 여러 문장)도 같은 API로 벡터로 바꾼다. 이때는 `**RETRIEVAL_QUERY`** 로 요청한다. “지금 이 **질문**과 맞는 문서를 찾아라”에 맞춘 설정이다.
+
+즉, **의결례는 ‘문서용’ 벡터**, **민원 글은 ‘질의용’ 벡터**로 각각 만들고, 둘을 같은 기준으로 비교한다. 모델 안에서 구체적으로 몇 층 신경망을 쓰는지까지는 공개 문서에 다 있지 않을 수 있지만, 사용 입장에서는 “문장 → 의미가 담긴 숫자 벡터”로 바꿔 준다고 이해하면 된다.
+
+### 유사도는 어떻게 계산하나
+
+두 벡터가 **얼마나 같은 방향을 보는지**를 숫자로 나타낸 것이 **코사인 유사도**에 가깝다. 이 저장소의 스크립트는 벡터를 길이 1로 맞춘 뒤(**L2 정규화**), 두 벡터의 **내적**을 유사도로 쓴다. 정규화된 벡터끼리는 내적이 곧 코사인 유사도와 같아서, 값이 클수록 의미적으로 가깝다고 본다.
+
+### 알아 두면 좋은 점
+
+- 시맨틱 검색은 **“비슷해 보인다”는 통계적 추천**에 가깝고, **법적 판단이나 최종 결론을 대신해 주지 않는다.**
+- 찾아지는 범위는 **이 색인에 들어 있는 의결례** 안으로 한정된다. 저장소에 내려받아 두지 않은 사안은 아무리 잘 임베딩해도 나오지 않는다.
+- API로 텍스트를 내므로, **민감한 개인정보를 넣기 전**에 가명·요약 등을 검토하는 것이 좋다(아래 “개인정보·비용·면책” 참고).
 
 ---
 
@@ -28,19 +66,21 @@
 ## 빠른 시작
 
 ```bash
-git clone <저장소 URL>
+git clone https://github.com/ray-ho33/jeob-su.git
 cd jeob-su
 cp .env.example .env   # 키 입력 후 저장
 ```
 
 ### 1) 환경 변수
 
-프로젝트 루트에 `.env`를 두면 [`scripts/lib/load-env.mjs`](scripts/lib/load-env.mjs)가 자동으로 읽습니다. **키는 GitHub·채팅·로그에 넣지 마세요.** `.env`는 `.gitignore`에 포함되어 있습니다.
+프로젝트 루트에 `.env`를 두면 `[scripts/lib/load-env.mjs](scripts/lib/load-env.mjs)`가 자동으로 읽습니다. **키는 GitHub·채팅·로그에 넣지 마세요.** `.env`는 `.gitignore`에 포함되어 있습니다.
 
-| 변수 | 용도 |
-|------|------|
-| `LAW_OC` 또는 `KOREAN_LAW_API_KEY` | 법제처 API — **다운로드** |
+
+| 변수                                   | 용도                           |
+| ------------------------------------ | ---------------------------- |
+| `LAW_OC` 또는 `KOREAN_LAW_API_KEY`     | 법제처 API — **다운로드**           |
 | `GEMINI_API_KEY` 또는 `GOOGLE_API_KEY` | Google AI Studio — **색인·검색** |
+
 
 발급 안내: [법제처 오픈API](https://open.law.go.kr/LSO/openApi/guideResult.do) · [Google AI Studio API 키](https://aistudio.google.com/app/apikey)
 
@@ -54,7 +94,7 @@ node scripts/setup-acr-semantic.mjs
 
 강제로 다시 받거나 색인만 다시 만들 때: `--force-download`, `--force-rebuild`. 소량만: `--max-pages 2 --build-limit 5`.
 
-Cursor에서 **`@jeob-su`** 스킬을 쓸 때도, 에이전트가 이 명령으로 먼저 자료·색인을 맞추도록 [스킬](.cursor/skills/jeob-su/SKILL.md)에 적어 두었습니다.
+Cursor에서 `**@jeob-su**` 스킬을 쓸 때도, 에이전트가 이 명령으로 먼저 자료·색인을 맞추도록 [스킬](.cursor/skills/jeob-su/SKILL.md)에 적어 두었습니다.
 
 ### 3) 결정문만 / 색인만 실행할 때
 
@@ -113,7 +153,7 @@ node scripts/smoke-acr-semantic.mjs
 ```
 scripts/
   setup-acr-semantic.mjs        # 다운로드 + 색인 자동 보정
-  download-acr-decisions.mjs   # 코퍼스 수집
+  download-acr-decisions.mjs   # 결정문 JSON 수집
   build-acr-semantic-index.mjs
   query-acr-semantic.mjs
   smoke-acr-semantic.mjs
@@ -128,13 +168,13 @@ data/
 AGENTS.md                      # AI 에이전트용 요약
 ```
 
-대용량 `data/`는 **`.gitignore`에 넣거나 Git LFS** 등으로 별도 관리하는 편이 일반적입니다.
+대용량 `data/`는 `**.gitignore`에 넣거나 Git LFS** 등으로 별도 관리하는 편이 일반적입니다.
 
 ---
 
 ## Cursor
 
-에이전트 워크플로는 [`.cursor/skills/jeob-su/SKILL.md`](.cursor/skills/jeob-su/SKILL.md)를 참고하세요. 채팅에서 `@jeob-su`로 불러 쓸 수 있습니다.
+에이전트 워크플로는 `[.cursor/skills/jeob-su/SKILL.md](.cursor/skills/jeob-su/SKILL.md)`를 참고하세요. 채팅에서 `@jeob-su`로 불러 쓸 수 있습니다.
 
 ---
 
@@ -149,12 +189,14 @@ AGENTS.md                      # AI 에이전트용 요약
 
 ## 문제 해결
 
-| 증상 | 확인 |
-|------|------|
-| 인증키 오류 | 루트 `.env` 위치, 변수명 철자, 값 앞뒤 불필요한 따옴표 |
+
+| 증상             | 확인                                                       |
+| -------------- | -------------------------------------------------------- |
+| 인증키 오류         | 루트 `.env` 위치, 변수명 철자, 값 앞뒤 불필요한 따옴표                      |
 | 검색 실패 / 인덱스 없음 | `data/acr-decisions/semantic/index.json` 존재 여부, 먼저 빌드 실행 |
-| 유사도 이상 | 빌드에 `--dimensions`를 썼다면 쿼리에도 동일 값 |
-| 결과가 기대와 다름 | 코퍼스에 없는 사안은 검색되지 않음. 질의를 구체화해 재시도 |
+| 유사도 이상         | 빌드에 `--dimensions`를 썼다면 쿼리에도 동일 값                        |
+| 결과가 기대와 다름     | 색인에 없는 사안은 검색되지 않음. 질의를 구체화해 재시도                         |
+
 
 ---
 
