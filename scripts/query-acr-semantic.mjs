@@ -8,15 +8,13 @@
  *   echo "민원 본문" | node scripts/query-acr-semantic.mjs --format md
  */
 
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getGeminiApiKey } from "./lib/gemini-embed.mjs";
 import {
-  getGeminiApiKey,
-  geminiEmbed,
-  l2Normalize,
-  dot,
-} from "./lib/gemini-embed.mjs";
+  loadSemanticIndex,
+  searchSimilarFromIndex,
+} from "./lib/acr-semantic-search.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
@@ -72,50 +70,45 @@ async function main() {
     process.exit(1);
   }
 
-  const raw = await readFile(indexPath, "utf8");
-  const { manifest, items } = JSON.parse(raw);
-  if (!Array.isArray(items) || items.length === 0) {
+  const index = await loadSemanticIndex(indexPath);
+  if (!index.items.length) {
     console.error("인덱스에 항목이 없습니다. 먼저 build-acr-semantic-index.mjs 실행.");
     process.exit(2);
   }
 
   const embedModel =
-    model ||
-    process.env.GEMINI_EMBED_MODEL ||
-    manifest?.model ||
-    "gemini-embedding-001";
-  const embedOpts = { taskType: "RETRIEVAL_QUERY" };
+    model || process.env.GEMINI_EMBED_MODEL || index.manifest?.model || "";
   const dimUse =
-    dimensions > 0 ? dimensions : manifest?.outputDimensionality || 0;
-  if (dimUse > 0) embedOpts.outputDimensionality = dimUse;
+    dimensions > 0 ? dimensions : index.manifest?.outputDimensionality || 0;
 
-  const qVec = l2Normalize(
-    await geminiEmbed(queryText, embedOpts, { apiKey, model: embedModel }),
-  );
-
-  const scored = [];
-  for (const it of items) {
-    const v = it.embedding;
-    if (!Array.isArray(v) || v.length !== qVec.length) {
-      console.warn(
-        `차원 불일치 건너뜀 id=${it.id}: index=${v?.length} query=${qVec.length}`,
-      );
-      continue;
-    }
-    scored.push({ ...it, score: dot(qVec, v) });
+  let out;
+  try {
+    out = await searchSimilarFromIndex({
+      index,
+      queryText,
+      top,
+      embedModel,
+      dimensions: dimUse,
+      apiKey,
+      onDimensionMismatch: ({ id, indexLen, queryLen }) => {
+        console.warn(
+          `차원 불일치 건너뜀 id=${id}: index=${indexLen} query=${queryLen}`,
+        );
+      },
+    });
+  } catch (e) {
+    console.error(e.message || e);
+    process.exit(2);
   }
-  scored.sort((a, b) => b.score - a.score);
-  const hits = scored.slice(0, top).map(({ embedding, ...x }) => x);
 
-  const out = {
-    queryPreview: queryText.slice(0, 200) + (queryText.length > 200 ? "…" : ""),
-    indexModel: manifest?.model,
-    queryModel: embedModel,
-    top,
-    hits,
-  };
+  if (index.items.length > 0 && out.hits.length === 0) {
+    console.warn(
+      "일치 가능한 결과가 없습니다. 빌드/검색에 동일한 --dimensions가 필요한지 또는 인덱스 구조를 확인하세요.",
+    );
+  }
 
   if (format === "md") {
+    const hits = out.hits;
     let md = `## 유사 권익위 결정문 (Top ${top})\n\n`;
     for (let i = 0; i < hits.length; i++) {
       const h = hits[i];
