@@ -139,6 +139,35 @@ echo "민원 본문" | node scripts/query-acr-semantic.mjs --format md
 node scripts/smoke-acr-semantic.mjs
 ```
 
+### MCP 서버(stdio)
+
+Cursor 등 **MCP(Model Context Protocol)** 클라이언트에서 같은 시맨틱 검색·발췌를 호출할 수 있습니다. 의존성 없이 저장소 안의 **`node`** 만으로 **`scripts/acr-mcp-stdio-server.mjs`** 가 stdio JSON-RPC 라인 하나씩 처리합니다.
+
+- **실행 파일**: `[scripts/acr-mcp-stdio-server.mjs](scripts/acr-mcp-stdio-server.mjs)`
+- **도구**: `health_check`, `search_similar_decisions`(Gemini 키 필요), `get_decision_detail`, `get_citation_pack`
+- **`search_similar_decisions`** 는 `build` 시 **`--dimensions N`** 을 썼다면 MCP 인수 **`dimensions`** 로도 동일 값을 맞춰야 합니다.
+- Gemini 키 없이 MCP 핸셰이크·도구 목록·`health_check` 만 검증할 때:
+
+```bash
+node scripts/smoke-acr-mcp.mjs
+```
+
+예시(Cursor MCP 설정 형식 참고용 — 경로를 본인 환경에 맞게 바꾸세요):
+
+```json
+{
+  "mcpServers": {
+    "jeob-su-acr": {
+      "command": "node",
+      "args": ["/절대경로/jeob-su/scripts/acr-mcp-stdio-server.mjs"],
+      "cwd": "/절대경로/jeob-su"
+    }
+  }
+}
+```
+
+민감 정보는 MCP·Gemini 호출 면책 문구와 동일하게 **직접 입력 전 요약·가명**을 검토하세요.
+
 ---
 
 ## 기술 개요
@@ -157,9 +186,12 @@ scripts/
   download-acr-decisions.mjs   # 결정문 JSON 수집
   build-acr-semantic-index.mjs
   query-acr-semantic.mjs
+  acr-mcp-stdio-server.mjs       # MCP stdio 서버(도구 4종)
   smoke-acr-semantic.mjs
+  smoke-acr-mcp.mjs              # MCP 라이프사이클·health 무키 스모크
   lib/
     gemini-embed.mjs           # Gemini 호출·정규화·내적
+    acr-semantic-search.mjs      # 인덱스 로드·검색 코어(shared)
     load-env.mjs               # .env 로드
 data/
   acr-decisions/

@@ -26,6 +26,9 @@ node scripts/build-acr-semantic-index.mjs
 node scripts/build-acr-semantic-index.mjs --limit 5
 node scripts/query-acr-semantic.mjs --format md --top 10 -- "민원 또는 사실관계"
 node scripts/smoke-acr-semantic.mjs
+node scripts/smoke-acr-mcp.mjs
+# MCP 연동 실행(클라이언트에서 stdio로 구동 시 직접 호출 거의 안 함)
+# node scripts/acr-mcp-stdio-server.mjs
 ```
 
 - `@jeob-su` 스킬 사용 시: [`.cursor/skills/jeob-su/SKILL.md`](.cursor/skills/jeob-su/SKILL.md)에 따라 **먼저** `setup-acr-semantic.mjs`로 자료·색인을 맞춘 뒤 쿼리한다.
@@ -41,7 +44,7 @@ node scripts/smoke-acr-semantic.mjs
 
 ## 코드 수정 시
 
-- 스크립트 공통: [`scripts/lib/gemini-embed.mjs`](scripts/lib/gemini-embed.mjs), [`scripts/lib/load-env.mjs`](scripts/lib/load-env.mjs).
+- 스크립트 공통: [`scripts/lib/gemini-embed.mjs`](scripts/lib/gemini-embed.mjs), [`scripts/lib/load-env.mjs`](scripts/lib/load-env.mjs), [`scripts/lib/acr-semantic-search.mjs`](scripts/lib/acr-semantic-search.mjs)(검색 코어/MCP 재사용).
 - **범위**: 요청과 무관한 대규모 리팩터·`data/` 대량 수정은 피한다.
 - **법적 표현**: 이 도구는 법률 자문이 아니다. 출력 문구에서 과도한 단정을 피한다.
 
@@ -53,6 +56,9 @@ node scripts/smoke-acr-semantic.mjs
 | `scripts/download-acr-decisions.mjs` | 코퍼스 다운로드 |
 | `scripts/build-acr-semantic-index.mjs` | 시맨틱 인덱스 생성 |
 | `scripts/query-acr-semantic.mjs` | 유사도 검색 |
+| `scripts/acr-mcp-stdio-server.mjs` | MCP stdio 도구(health/search/detail/citation_pack) |
+| `scripts/smoke-acr-mcp.mjs` | MCP initialize/tools/health 무키 스모크 |
 | `scripts/smoke-acr-semantic.mjs` | 구조 검증 + 선택적 API 스모크 |
+| `scripts/lib/acr-semantic-search.mjs` | 시맨틱 검색 로직 분리(shared) |
 | `.cursor/skills/jeob-su/SKILL.md` | `@jeob-su` 스킬 본문 |
 | `.cursor/skills/korean-acr-semantic/SKILL.md` | 별칭 스킬 → jeob-su 참조 |
