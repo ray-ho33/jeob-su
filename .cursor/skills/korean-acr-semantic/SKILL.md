@@ -1,9 +1,8 @@
 ---
 name: korean-acr-semantic
 description: >-
-  (jeob-su 별칭) 권익위 시맨틱 검색. 레포 복제 후 호출 시 에이전트가
-  `setup-acr-semantic.mjs`로 다운로드·색인을 자동 보정한다. 절차는
-  스킬 `jeob-su`와 동일.
+  (jeob-su 별칭) 권익위 MCP 시맨틱 검색. 호출 시 MCP
+  ensure_semantic_corpus로 다운로드·색인을 맞춘다. 절차는 스킬 jeob-su와 동일.
 disable-model-invocation: false
 ---
 

@@ -50,7 +50,9 @@ export async function searchSimilarFromIndex(opts) {
   } = opts;
   const { manifest, items } = index;
   if (items.length === 0) {
-    throw new Error("인덱스에 항목이 없습니다. 먼저 build-acr-semantic-index.mjs를 실행하세요.");
+    throw new Error(
+      "인덱스에 항목이 없습니다. MCP 도구 ensure_semantic_corpus 또는 build_semantic_index를 먼저 실행하세요.",
+    );
   }
 
   const resolvedModel =
