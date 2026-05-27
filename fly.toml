@@ -1,0 +1,31 @@
+# Fly.io 배포 설정
+#
+# 처음 배포 전 Fly.io에서 같은 이름의 app을 만들거나,
+# GitHub Repository Variable FLY_APP_NAME으로 다른 이름을 지정하세요.
+
+app = "jeob-su-acr-mcp"
+primary_region = "nrt"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  HOST = "0.0.0.0"
+  PORT = "3000"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 50
+    hard_limit = 100
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
