@@ -81,6 +81,10 @@ cp .env.example .env   # 키 입력 후 저장
 | ------------------------------------ | ---------------------------- |
 | `LAW_OC` 또는 `KOREAN_LAW_API_KEY`     | 법제처 API — **다운로드**           |
 | `GEMINI_API_KEY` 또는 `GOOGLE_API_KEY` | Google AI Studio — **색인·검색** |
+| `PORT`                                | HTTP MCP 서버 포트, 기본 `3000` |
+| `HOST`                                | HTTP MCP 서버 바인딩 주소, 기본 `0.0.0.0` |
+| `MCP_ACCESS_TOKEN`                    | 선택: 공개 HTTP MCP 서버 접근 토큰 |
+| `MCP_ALLOWED_ORIGINS`                 | 선택: 추가 허용 Origin 목록, 쉼표로 구분 |
 
 
 발급 안내: [법제처 오픈API](https://open.law.go.kr/LSO/openApi/guideResult.do) · [Google AI Studio API 키](https://aistudio.google.com/app/apikey)
@@ -168,6 +172,71 @@ node scripts/smoke-acr-mcp.mjs
 
 민감 정보는 MCP·Gemini 호출 면책 문구와 동일하게 **직접 입력 전 요약·가명**을 검토하세요.
 
+### MCP 서버(HTTP)
+
+Claude.ai 웹의 **커스텀 커넥터**는 위의 stdio 설정처럼 내 컴퓨터의 파일을 직접 실행하지 않습니다. 대신 인터넷에서 접근 가능한 **HTTPS URL**로 MCP 서버에 접속합니다.
+
+이 저장소는 로컬 검증용 HTTP MCP 서버도 제공합니다.
+
+- **실행 파일**: [scripts/acr-mcp-http-server.mjs](scripts/acr-mcp-http-server.mjs)
+- **MCP URL**: `http://localhost:3000/mcp` (로컬 테스트용)
+- **상태 확인 URL**: `http://localhost:3000/health`
+- **도구**: stdio MCP와 동일한 `health_check`, `search_similar_decisions`, `get_decision_detail`, `get_citation_pack`
+
+로컬에서 실행:
+
+```bash
+node scripts/acr-mcp-http-server.mjs
+```
+
+이 명령어는 `PORT` 환경변수가 없으면 기본으로 `3000`번 포트에서 HTTP MCP 서버를 엽니다.
+
+배포 환경처럼 포트를 지정해 실행:
+
+```bash
+PORT=3000 HOST=0.0.0.0 node scripts/acr-mcp-http-server.mjs
+```
+
+HTTP MCP 스모크:
+
+```bash
+node scripts/smoke-acr-mcp-http.mjs
+```
+
+이 명령어는 임시 로컬 포트에서 HTTP 서버를 띄운 뒤 `/health`, `initialize`, `tools/list`, `health_check` 호출이 되는지 확인합니다.
+
+Gemini 키와 색인이 준비된 상태에서 MCP 검색 호출까지 확인하려면:
+
+```bash
+node scripts/smoke-acr-mcp-http.mjs --live-search
+```
+
+이 명령어는 `search_similar_decisions`도 한 번 호출하므로 Gemini API 사용량이 발생할 수 있습니다.
+
+Claude.ai 웹 커넥터에서 쓰려면 이 로컬 서버를 그대로 넣는 것이 아니라, Fly.io·Render·Railway 같은 곳에 배포해 공개 HTTPS 주소를 만들어야 합니다.
+
+Claude.ai 커넥터 URL 예시:
+
+```txt
+https://배포한주소.example/mcp
+```
+
+간단한 접근 토큰을 쓰고 싶다면 배포 환경에 `MCP_ACCESS_TOKEN`을 설정한 뒤 URL에 `token`을 붙일 수 있습니다.
+
+```txt
+https://배포한주소.example/mcp?token=발급한토큰
+```
+
+배포 플랫폼이 Docker를 지원한다면 저장소의 `Dockerfile`을 사용할 수 있습니다. 배포할 때는 플랫폼의 환경변수/Secret 설정에 `GEMINI_API_KEY`와 필요한 키를 넣고, `data/acr-decisions/semantic/index.json`과 `data/acr-decisions/text/*.json`이 함께 포함되어 있는지 확인하세요.
+
+주의:
+
+- `GEMINI_API_KEY`, `GOOGLE_API_KEY` 같은 키를 URL에 넣지 마세요.
+- API 키는 `.env` 또는 배포 플랫폼의 Secret/Environment Variables에 넣으세요.
+- `MCP_ACCESS_TOKEN`을 URL에 붙이는 방식은 간단하지만 URL 로그에 남을 수 있습니다. 클라이언트가 지원하면 `Authorization: Bearer ...` 헤더가 더 낫습니다.
+- Claude.ai에서 보낸 민원 본문은 검색 과정에서 Gemini API로 전송될 수 있습니다.
+- 공개 서버로 운영하면 요청량, 비용, 개인정보 처리를 별도로 관리해야 합니다.
+
 ---
 
 ## 기술 개요
@@ -187,11 +256,14 @@ scripts/
   build-acr-semantic-index.mjs
   query-acr-semantic.mjs
   acr-mcp-stdio-server.mjs       # MCP stdio 서버(도구 4종)
+  acr-mcp-http-server.mjs        # MCP HTTP 서버(Claude.ai 커넥터용)
   smoke-acr-semantic.mjs
   smoke-acr-mcp.mjs              # MCP 라이프사이클·health 무키 스모크
+  smoke-acr-mcp-http.mjs         # HTTP MCP 라이프사이클·health 무키 스모크
   lib/
     gemini-embed.mjs           # Gemini 호출·정규화·내적
     acr-semantic-search.mjs      # 인덱스 로드·검색 코어(shared)
+    acr-mcp-tools.mjs            # stdio/HTTP MCP 공통 도구 로직
     load-env.mjs               # .env 로드
 data/
   acr-decisions/
@@ -199,6 +271,8 @@ data/
     semantic/                  # 색인 산출물
 .cursor/skills/jeob-su/        # Cursor 에이전트 스킬
 AGENTS.md                      # AI 에이전트용 요약
+Dockerfile                     # HTTP MCP 서버 배포용 기본 컨테이너 설정
+.dockerignore                  # 컨테이너 빌드에서 비밀·불필요 파일 제외
 ```
 
 대용량 `data/`는 `**.gitignore`에 넣거나 Git LFS** 등으로 별도 관리하는 편이 일반적입니다.
