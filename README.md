@@ -148,7 +148,7 @@ node scripts/smoke-acr-semantic.mjs
 Cursor 등 **MCP(Model Context Protocol)** 클라이언트에서 같은 시맨틱 검색·발췌를 호출할 수 있습니다. 의존성 없이 저장소 안의 **`node`** 만으로 **`scripts/acr-mcp-stdio-server.mjs`** 가 stdio JSON-RPC 라인 하나씩 처리합니다.
 
 - **실행 파일**: `[scripts/acr-mcp-stdio-server.mjs](scripts/acr-mcp-stdio-server.mjs)`
-- **도구**: `health_check`, `search_similar_decisions`(Gemini 키 필요), `get_decision_detail`, `get_citation_pack`
+- **도구**: `health_check`, `search_similar_decisions`(Gemini 키 필요), `get_decision_detail`, `get_citation_pack`, `ensure_semantic_corpus`, `download_acr_decisions`, `build_semantic_index`
 - **`search_similar_decisions`** 는 `build` 시 **`--dimensions N`** 을 썼다면 MCP 인수 **`dimensions`** 로도 동일 값을 맞춰야 합니다.
 - Gemini 키 없이 MCP 핸셰이크·도구 목록·`health_check` 만 검증할 때:
 
@@ -181,7 +181,7 @@ Claude.ai 웹의 **커스텀 커넥터**는 위의 stdio 설정처럼 내 컴퓨
 - **실행 파일**: [scripts/acr-mcp-http-server.mjs](scripts/acr-mcp-http-server.mjs)
 - **MCP URL**: `http://localhost:3000/mcp` (로컬 테스트용)
 - **상태 확인 URL**: `http://localhost:3000/health`
-- **도구**: stdio MCP와 동일한 `health_check`, `search_similar_decisions`, `get_decision_detail`, `get_citation_pack`
+- **도구**: stdio MCP와 동일한 `health_check`, `search_similar_decisions`, `get_decision_detail`, `get_citation_pack`, `ensure_semantic_corpus`, `download_acr_decisions`, `build_semantic_index`
 
 로컬에서 실행:
 
@@ -316,12 +316,15 @@ scripts/
   download-acr-decisions.mjs   # 결정문 JSON 수집
   build-acr-semantic-index.mjs
   query-acr-semantic.mjs
-  acr-mcp-stdio-server.mjs       # MCP stdio 서버(도구 4종)
+  acr-mcp-stdio-server.mjs       # MCP stdio 서버(도구 7종)
   acr-mcp-http-server.mjs        # MCP HTTP 서버(Claude.ai 커넥터용)
   smoke-acr-semantic.mjs
   smoke-acr-mcp.mjs              # MCP 라이프사이클·health 무키 스모크
   smoke-acr-mcp-http.mjs         # HTTP MCP 라이프사이클·health 무키 스모크
   lib/
+    acr-download.mjs             # download_acr_decisions
+    acr-index-build.mjs          # build_semantic_index
+    acr-setup.mjs                # ensure_semantic_corpus
     gemini-embed.mjs           # Gemini 호출·정규화·내적
     acr-semantic-search.mjs      # 인덱스 로드·검색 코어(shared)
     acr-mcp-tools.mjs            # stdio/HTTP MCP 공통 도구 로직

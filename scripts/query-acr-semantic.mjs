@@ -1,11 +1,9 @@
 #!/usr/bin/env node
 /**
- * 민원 텍스트 → Gemini embedContent(RETRIEVAL_QUERY) → index.json 과 코사인 Top-K
- *
- * GEMINI_API_KEY 또는 GOOGLE_API_KEY — 환경변수 또는 프로젝트 루트 `.env`
+ * @deprecated MCP 도구 `search_similar_decisions` 사용을 권장합니다.
+ * 개발·점검용 CLI 래퍼.
  *
  *   node scripts/query-acr-semantic.mjs --top 10 -- "민원 본문"
- *   echo "민원 본문" | node scripts/query-acr-semantic.mjs --format md
  */
 
 import path from "node:path";
@@ -72,7 +70,9 @@ async function main() {
 
   const index = await loadSemanticIndex(indexPath);
   if (!index.items.length) {
-    console.error("인덱스에 항목이 없습니다. 먼저 build-acr-semantic-index.mjs 실행.");
+    console.error(
+      "인덱스에 항목이 없습니다. MCP 도구 ensure_semantic_corpus 또는 build_semantic_index를 먼저 실행하세요.",
+    );
     process.exit(2);
   }
 

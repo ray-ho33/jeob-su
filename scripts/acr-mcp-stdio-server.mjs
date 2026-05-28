@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 /**
- * MCP stdio 서버 (의존성 없음 — JSON-RPC 2.0 한 줄씩 stdin/stdout)
- * 도구: health_check, search_similar_decisions, get_decision_detail, get_citation_pack
+ * MCP stdio server (dependency-free JSON-RPC 2.0, one message per line).
  *
  *   node scripts/acr-mcp-stdio-server.mjs
  */
@@ -31,12 +30,11 @@ async function main() {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    /** @type {unknown} */
     let msg;
     try {
       msg = JSON.parse(trimmed);
     } catch {
-      send(jsonRpcError(null, -32700, "Parse error — MCP는 한 줄 JSON-RPC 페이로드만 받습니다."));
+      send(jsonRpcError(null, -32700, "Parse error: expected one JSON-RPC payload per line."));
       continue;
     }
 

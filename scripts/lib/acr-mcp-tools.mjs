@@ -8,6 +8,9 @@ import {
   loadSemanticIndex,
   searchSimilarFromIndex,
 } from "./acr-semantic-search.mjs";
+import { downloadAcrDecisions } from "./acr-download.mjs";
+import { buildSemanticIndex } from "./acr-index-build.mjs";
+import { ensureSemanticCorpus } from "./acr-setup.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.join(__dirname, "..", "..");
@@ -25,6 +28,9 @@ const MANIFEST_PATH = path.join(
   "semantic",
   "manifest.json",
 );
+const DEFAULT_DATA_OUT = path.join(ROOT, "data", "acr-decisions");
+const DEFAULT_TEXT_DIR = path.join(DEFAULT_DATA_OUT, "text");
+const DEFAULT_SEMANTIC_DIR = path.join(DEFAULT_DATA_OUT, "semantic");
 
 export const SERVER_INFO = {
   name: "jeob-su-acr-mcp",
@@ -38,6 +44,11 @@ export const SERVER_INSTRUCTIONS =
 let cachedIndexPath = null;
 /** @type {{ manifest: object, items: unknown[] } | null} */
 let cachedIndex = null;
+
+function invalidateIndexCache() {
+  cachedIndexPath = null;
+  cachedIndex = null;
+}
 
 async function getCachedSemanticIndex(absIndexPath) {
   if (cachedIndexPath !== absIndexPath || !cachedIndex) {
@@ -125,6 +136,58 @@ export const TOOLS = [
       required: ["decision_id"],
     },
   },
+  {
+    name: "ensure_semantic_corpus",
+    description:
+      "Create missing ACR decision JSON and semantic index files. Downloads text JSON when missing and builds index.json when missing. Use force options for a full rerun.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        force_download: { type: "boolean", default: false },
+        force_rebuild: { type: "boolean", default: false },
+        skip_download: { type: "boolean", default: false },
+        skip_build: { type: "boolean", default: false },
+        max_pages: { type: "integer", minimum: 1 },
+        build_limit: { type: "integer", minimum: 1 },
+        download_delay_ms: { type: "integer", minimum: 0 },
+        build_delay_ms: { type: "integer", minimum: 0 },
+        dimensions: { type: "integer", minimum: 0 },
+        model: { type: "string" },
+        data_out_dir: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "download_acr_decisions",
+    description:
+      "Download ACRC decision JSON files through the Korean law Open API into data/acr-decisions/text. Requires LAW_OC or KOREAN_LAW_API_KEY.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        force: { type: "boolean", default: false },
+        max_pages: { type: "integer", minimum: 1 },
+        display: { type: "integer", minimum: 1, maximum: 100, default: 100 },
+        delay_ms: { type: "integer", minimum: 0, default: 250 },
+        data_out_dir: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "build_semantic_index",
+    description:
+      "Build semantic/index.json from local decision JSON files with Gemini embeddings. Requires GEMINI_API_KEY or GOOGLE_API_KEY.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", minimum: 1 },
+        delay_ms: { type: "integer", minimum: 0, default: 200 },
+        dimensions: { type: "integer", minimum: 0 },
+        model: { type: "string" },
+        text_dir: { type: "string" },
+        out_dir: { type: "string" },
+      },
+    },
+  },
 ];
 
 export function textResult(payload, isError = false) {
@@ -164,6 +227,79 @@ async function resolveIndexPath(relOrAbs) {
   return path.isAbsolute(relOrAbs)
     ? relOrAbs
     : path.resolve(ROOT, relOrAbs);
+}
+
+function resolveDataOutDir(relOrAbs) {
+  if (!relOrAbs || !String(relOrAbs).trim()) return DEFAULT_DATA_OUT;
+  return path.isAbsolute(relOrAbs)
+    ? relOrAbs
+    : path.resolve(ROOT, relOrAbs);
+}
+
+function parseOptionalInt(v) {
+  if (v == null || v === "") return undefined;
+  const n = parseInt(String(v), 10);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+async function ensureSemanticCorpusTool(args) {
+  const dataOut = resolveDataOutDir(args?.data_out_dir);
+  const result = await ensureSemanticCorpus({
+    rootDir: ROOT,
+    dataOutDir: dataOut,
+    forceDownload: Boolean(args?.force_download),
+    forceRebuild: Boolean(args?.force_rebuild),
+    skipDownload: Boolean(args?.skip_download),
+    skipBuild: Boolean(args?.skip_build),
+    maxPages: parseOptionalInt(args?.max_pages),
+    buildLimit: parseOptionalInt(args?.build_limit),
+    downloadDelayMs: parseOptionalInt(args?.download_delay_ms),
+    buildDelayMs: parseOptionalInt(args?.build_delay_ms),
+    dimensions: parseOptionalInt(args?.dimensions),
+    model: args?.model ? String(args.model) : undefined,
+  });
+  if (result.ranBuild) invalidateIndexCache();
+  return result;
+}
+
+async function downloadAcrDecisionsTool(args) {
+  const dataOut = resolveDataOutDir(args?.data_out_dir);
+  return await downloadAcrDecisions({
+    outDir: dataOut,
+    maxPages: parseOptionalInt(args?.max_pages),
+    display: parseOptionalInt(args?.display) ?? 100,
+    delayMs: parseOptionalInt(args?.delay_ms) ?? 250,
+    force: Boolean(args?.force),
+  });
+}
+
+async function buildSemanticIndexTool(args) {
+  const textDir = args?.text_dir
+    ? path.isAbsolute(args.text_dir)
+      ? args.text_dir
+      : path.resolve(ROOT, args.text_dir)
+    : DEFAULT_TEXT_DIR;
+  const outDir = args?.out_dir
+    ? path.isAbsolute(args.out_dir)
+      ? args.out_dir
+      : path.resolve(ROOT, args.out_dir)
+    : DEFAULT_SEMANTIC_DIR;
+
+  const result = await buildSemanticIndex({
+    rootDir: ROOT,
+    textDir,
+    outDir,
+    limit: parseOptionalInt(args?.limit),
+    delayMs: parseOptionalInt(args?.delay_ms) ?? 200,
+    dimensions: parseOptionalInt(args?.dimensions) ?? 0,
+    model: args?.model ? String(args.model) : undefined,
+  });
+  invalidateIndexCache();
+  return {
+    manifest: result.manifest,
+    indexPath: path.relative(ROOT, result.indexPath).split(path.sep).join("/"),
+    itemCount: result.itemCount,
+  };
 }
 
 export async function healthCheckTool() {
@@ -374,6 +510,12 @@ export async function handleToolsCall(params) {
       return textResult(await getDecisionDetail(args));
     case "get_citation_pack":
       return textResult(await getCitationPack(args));
+    case "ensure_semantic_corpus":
+      return textResult(await ensureSemanticCorpusTool(args));
+    case "download_acr_decisions":
+      return textResult(await downloadAcrDecisionsTool(args));
+    case "build_semantic_index":
+      return textResult(await buildSemanticIndexTool(args));
     default:
       return textResult(`알 수 없는 도구: ${name}`, true);
   }
