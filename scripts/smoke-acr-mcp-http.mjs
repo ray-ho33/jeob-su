@@ -67,15 +67,80 @@ async function postMcp(base, payload) {
   return JSON.parse(text);
 }
 
-async function main() {
+async function spawnServer(extraEnv = {}) {
   const proc = spawn(process.execPath, [MCP_SCRIPT], {
     cwd: ROOT,
     stdio: ["ignore", "ignore", "pipe"],
-    env: { ...process.env, HOST: "127.0.0.1", PORT: "0" },
+    env: {
+      ...process.env,
+      HOST: "127.0.0.1",
+      PORT: "0",
+      MCP_ACCESS_TOKEN: "",
+      MCP_ENABLE_MUTATING_TOOLS: "",
+      ...extraEnv,
+    },
   });
-
   const { host, port } = await waitForServer(proc);
-  const base = `http://${host}:${port}`;
+  return { proc, base: `http://${host}:${port}` };
+}
+
+async function smokeTokenAuth() {
+  const { proc, base } = await spawnServer({ MCP_ACCESS_TOKEN: "smoke-token" });
+  try {
+    const noToken = await fetch(`${base}/health`);
+    if (noToken.status !== 401)
+      throw new Error(`토큰 없는 요청은 401이어야 함: ${noToken.status}`);
+
+    const wrongToken = await fetch(`${base}/health`, {
+      headers: { authorization: "Bearer wrong" },
+    });
+    if (wrongToken.status !== 401)
+      throw new Error(`잘못된 토큰은 401이어야 함: ${wrongToken.status}`);
+
+    const bearer = await fetch(`${base}/health`, {
+      headers: { authorization: "Bearer smoke-token" },
+    });
+    if (!bearer.ok)
+      throw new Error(`Bearer 토큰 요청 실패: ${bearer.status}`);
+
+    const query = await fetch(`${base}/health?token=smoke-token`);
+    if (!query.ok)
+      throw new Error(`query 토큰 요청 실패: ${query.status}`);
+  } finally {
+    proc.kill();
+  }
+}
+
+async function smokeMutatingEnabled() {
+  const { proc, base } = await spawnServer({ MCP_ENABLE_MUTATING_TOOLS: "1" });
+  try {
+    const list = await postMcp(base, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+    });
+    const names = new Set((list?.result?.tools ?? []).map((t) => t?.name));
+    if (!names.has("build_semantic_index"))
+      throw new Error("MCP_ENABLE_MUTATING_TOOLS=1인데 mutating 도구가 목록에 없음");
+
+    // 상한 인수 없는 호출은 장시간 실행 방지를 위해 거부되어야 한다.
+    const unbounded = await postMcp(base, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "build_semantic_index", arguments: {} },
+    });
+    if (unbounded?.result?.isError !== true)
+      throw new Error(
+        `상한 없는 mutating 호출은 isError여야 함: ${JSON.stringify(unbounded)}`,
+      );
+  } finally {
+    proc.kill();
+  }
+}
+
+async function main() {
+  const { proc, base } = await spawnServer();
 
   try {
     const healthRes = await fetch(`${base}/health`);
@@ -144,6 +209,29 @@ async function main() {
         );
     }
 
+    const mutating = [
+      "ensure_semantic_corpus",
+      "download_acr_decisions",
+      "build_semantic_index",
+    ];
+    for (const m of mutating) {
+      if (names.has(m))
+        throw new Error(
+          `HTTP 기본 설정에서 mutating 도구 '${m}'는 목록에 없어야 함`,
+        );
+    }
+
+    const mutatingCall = await postMcp(base, {
+      jsonrpc: "2.0",
+      id: 10,
+      method: "tools/call",
+      params: { name: "build_semantic_index", arguments: {} },
+    });
+    if (mutatingCall?.result?.isError !== true)
+      throw new Error(
+        `HTTP 기본 설정에서 mutating 도구 호출은 isError여야 함: ${JSON.stringify(mutatingCall)}`,
+      );
+
     const healthRpc = await postMcp(base, {
       jsonrpc: "2.0",
       id: 3,
@@ -183,6 +271,12 @@ async function main() {
   } finally {
     proc.kill();
   }
+
+  await smokeTokenAuth();
+  console.log("smoke-acr-mcp-http token auth OK");
+
+  await smokeMutatingEnabled();
+  console.log("smoke-acr-mcp-http mutating-tools gate OK");
 }
 
 main().catch((e) => {

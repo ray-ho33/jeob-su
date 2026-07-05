@@ -37,6 +37,21 @@ export const SERVER_INFO = {
   version: "0.1.0",
 };
 
+const SUPPORTED_PROTOCOL_VERSIONS = new Set([
+  "2025-06-18",
+  "2025-03-26",
+  "2024-11-05",
+]);
+const DEFAULT_PROTOCOL_VERSION = "2024-11-05";
+
+// 다운로드·색인 등 파일을 쓰거나 외부 API 비용이 발생하는 도구.
+// HTTP 전송처럼 신뢰할 수 없는 호출자가 있는 경로에서는 기본 비활성화한다.
+export const MUTATING_TOOL_NAMES = new Set([
+  "ensure_semantic_corpus",
+  "download_acr_decisions",
+  "build_semantic_index",
+]);
+
 export const SERVER_INSTRUCTIONS =
   "국민권익위원회 의결례 로컬 색인을 대상으로 시맨틱 검색 및 발췌를 돕는 도구입니다. 법률 자문이 아니며, 민감 정보는 Gemini API로 전송될 수 있습니다.";
 
@@ -222,18 +237,24 @@ function normalizeDecisionId(raw) {
   return base;
 }
 
+// 도구 인수로 받은 경로는 항상 저장소 루트 안으로 제한한다.
+function resolveInsideRoot(relOrAbs, fallback, label) {
+  if (relOrAbs == null || !String(relOrAbs).trim()) return fallback;
+  const s = String(relOrAbs).trim();
+  const resolved = path.isAbsolute(s) ? path.resolve(s) : path.resolve(ROOT, s);
+  const rel = path.relative(ROOT, resolved);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error(`${label}은(는) 저장소 루트 안의 경로여야 합니다.`);
+  }
+  return resolved;
+}
+
 async function resolveIndexPath(relOrAbs) {
-  if (!relOrAbs || !String(relOrAbs).trim()) return DEFAULT_INDEX;
-  return path.isAbsolute(relOrAbs)
-    ? relOrAbs
-    : path.resolve(ROOT, relOrAbs);
+  return resolveInsideRoot(relOrAbs, DEFAULT_INDEX, "index_path");
 }
 
 function resolveDataOutDir(relOrAbs) {
-  if (!relOrAbs || !String(relOrAbs).trim()) return DEFAULT_DATA_OUT;
-  return path.isAbsolute(relOrAbs)
-    ? relOrAbs
-    : path.resolve(ROOT, relOrAbs);
+  return resolveInsideRoot(relOrAbs, DEFAULT_DATA_OUT, "data_out_dir");
 }
 
 function parseOptionalInt(v) {
@@ -274,16 +295,8 @@ async function downloadAcrDecisionsTool(args) {
 }
 
 async function buildSemanticIndexTool(args) {
-  const textDir = args?.text_dir
-    ? path.isAbsolute(args.text_dir)
-      ? args.text_dir
-      : path.resolve(ROOT, args.text_dir)
-    : DEFAULT_TEXT_DIR;
-  const outDir = args?.out_dir
-    ? path.isAbsolute(args.out_dir)
-      ? args.out_dir
-      : path.resolve(ROOT, args.out_dir)
-    : DEFAULT_SEMANTIC_DIR;
+  const textDir = resolveInsideRoot(args?.text_dir, DEFAULT_TEXT_DIR, "text_dir");
+  const outDir = resolveInsideRoot(args?.out_dir, DEFAULT_SEMANTIC_DIR, "out_dir");
 
   const result = await buildSemanticIndex({
     rootDir: ROOT,
@@ -496,9 +509,43 @@ async function getCitationPack(args) {
   };
 }
 
-export async function handleToolsCall(params) {
+// HTTP처럼 요청 타임아웃이 있는 전송에서 전체 다운로드·전체 재색인(수 분 소요,
+// 문서 수만큼 Gemini 호출)이 무제한으로 돌지 않도록 상한 인수를 강제한다.
+function assertBoundedMutation(name, args) {
+  const missing = [];
+  if (name === "download_acr_decisions") {
+    if (!(parseOptionalInt(args?.max_pages) > 0)) missing.push("max_pages");
+  } else if (name === "build_semantic_index") {
+    if (!(parseOptionalInt(args?.limit) > 0)) missing.push("limit");
+  } else if (name === "ensure_semantic_corpus") {
+    if (!args?.skip_download && !(parseOptionalInt(args?.max_pages) > 0)) {
+      missing.push("max_pages(또는 skip_download)");
+    }
+    if (!args?.skip_build && !(parseOptionalInt(args?.build_limit) > 0)) {
+      missing.push("build_limit(또는 skip_build)");
+    }
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `이 전송(HTTP)에서는 장시간 실행 방지를 위해 ${missing.join(", ")} 지정이 필요합니다. 전체 실행은 로컬 CLI(node scripts/setup-acr-semantic.mjs)를 사용하세요.`,
+    );
+  }
+}
+
+export async function handleToolsCall(params, options = {}) {
   const name = params?.name;
   const args = params?.arguments ?? {};
+  if (MUTATING_TOOL_NAMES.has(name)) {
+    if (options.allowMutatingTools === false) {
+      return textResult(
+        `'${name}' 도구는 이 서버에서 비활성화되어 있습니다. 서버 운영자가 MCP_ENABLE_MUTATING_TOOLS=1로 실행해야 사용할 수 있습니다.`,
+        true,
+      );
+    }
+    if (options.requireBoundedMutations) {
+      assertBoundedMutation(name, args);
+    }
+  }
   switch (name) {
     case "health_check":
       return textResult(await healthCheckTool());
@@ -521,7 +568,7 @@ export async function handleToolsCall(params) {
   }
 }
 
-export async function handleJsonRpcMessage(msg) {
+export async function handleJsonRpcMessage(msg, options = {}) {
   if (!msg || typeof msg !== "object") {
     return jsonRpcError(null, -32600, "Invalid Request");
   }
@@ -537,10 +584,13 @@ export async function handleJsonRpcMessage(msg) {
 
   try {
     if (m.method === "initialize") {
-      const pv =
+      const requested =
         typeof m.params?.protocolVersion === "string"
           ? m.params.protocolVersion
-          : "2024-11-05";
+          : "";
+      const pv = SUPPORTED_PROTOCOL_VERSIONS.has(requested)
+        ? requested
+        : DEFAULT_PROTOCOL_VERSION;
       return {
         jsonrpc: "2.0",
         id,
@@ -554,7 +604,11 @@ export async function handleJsonRpcMessage(msg) {
     }
 
     if (m.method === "tools/list") {
-      return { jsonrpc: "2.0", id, result: { tools: TOOLS } };
+      const tools =
+        options.allowMutatingTools === false
+          ? TOOLS.filter((t) => !MUTATING_TOOL_NAMES.has(t.name))
+          : TOOLS;
+      return { jsonrpc: "2.0", id, result: { tools } };
     }
 
     if (m.method === "tools/call") {
@@ -562,7 +616,7 @@ export async function handleJsonRpcMessage(msg) {
         return {
           jsonrpc: "2.0",
           id,
-          result: await handleToolsCall(m.params),
+          result: await handleToolsCall(m.params, options),
         };
       } catch (e) {
         const msgText = e instanceof Error ? e.message : String(e);

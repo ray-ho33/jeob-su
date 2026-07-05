@@ -7,6 +7,7 @@
  */
 
 import http from "node:http";
+import { createHash, timingSafeEqual } from "node:crypto";
 
 import { loadProjectEnv } from "./lib/load-env.mjs";
 import {
@@ -16,6 +17,8 @@ import {
 } from "./lib/acr-mcp-tools.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024;
+const RATE_WINDOW_MS = 60_000;
+const RATE_BUCKET_SWEEP_SIZE = 1024;
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://claude.ai",
   "https://www.claude.ai",
@@ -79,6 +82,14 @@ function getCorsHeaders(origin = "") {
   };
 }
 
+function tokenMatches(provided, expected) {
+  if (!provided) return false;
+  // 해시 후 비교: 길이가 달라도 timingSafeEqual을 쓸 수 있고 길이 정보도 새지 않는다.
+  const a = createHash("sha256").update(provided).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
+}
+
 function isAuthorized(req, url) {
   const expected = (process.env.MCP_ACCESS_TOKEN || "").trim();
   if (!expected) return true;
@@ -87,7 +98,55 @@ function isAuthorized(req, url) {
   const bearer = auth.toLowerCase().startsWith("bearer ")
     ? auth.slice("bearer ".length).trim()
     : "";
-  return queryToken === expected || bearer === expected;
+  return tokenMatches(queryToken, expected) || tokenMatches(bearer, expected);
+}
+
+function isTruthyEnv(name) {
+  const v = (process.env[name] || "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+function getToolOptions() {
+  return {
+    allowMutatingTools: isTruthyEnv("MCP_ENABLE_MUTATING_TOOLS"),
+    requireBoundedMutations: true,
+  };
+}
+
+/** @type {Map<string, number[]>} */
+const rateBuckets = new Map();
+
+function getClientIp(req) {
+  const fly = String(req.headers["fly-client-ip"] || "").trim();
+  if (fly) return fly;
+  const fwd = String(req.headers["x-forwarded-for"] || "")
+    .split(",")[0]
+    .trim();
+  if (fwd) return fwd;
+  return req.socket?.remoteAddress || "unknown";
+}
+
+function isRateLimited(ip) {
+  const limit = Number.parseInt(process.env.MCP_RATE_LIMIT || "60", 10);
+  if (!Number.isFinite(limit) || limit <= 0) return false;
+  const now = Date.now();
+  if (rateBuckets.size > RATE_BUCKET_SWEEP_SIZE) {
+    for (const [key, times] of rateBuckets) {
+      if (times.length === 0 || now - times[times.length - 1] >= RATE_WINDOW_MS) {
+        rateBuckets.delete(key);
+      }
+    }
+  }
+  const recent = (rateBuckets.get(ip) || []).filter(
+    (t) => now - t < RATE_WINDOW_MS,
+  );
+  if (recent.length >= limit) {
+    rateBuckets.set(ip, recent);
+    return true;
+  }
+  recent.push(now);
+  rateBuckets.set(ip, recent);
+  return false;
 }
 
 function readBody(req) {
@@ -119,10 +178,11 @@ async function handleMcpPost(req, res, corsHeaders) {
     return;
   }
 
+  const toolOptions = getToolOptions();
   if (Array.isArray(payload)) {
     const responses = [];
     for (const item of payload) {
-      const response = await handleJsonRpcMessage(item);
+      const response = await handleJsonRpcMessage(item, toolOptions);
       if (response) responses.push(response);
     }
     if (responses.length === 0) {
@@ -133,7 +193,7 @@ async function handleMcpPost(req, res, corsHeaders) {
     return;
   }
 
-  const response = await handleJsonRpcMessage(payload);
+  const response = await handleJsonRpcMessage(payload, toolOptions);
   if (!response) {
     sendText(res, 202, "", corsHeaders);
     return;
@@ -159,6 +219,16 @@ async function route(req, res) {
   const url = new URL(req.url || "/", "http://localhost");
   if (!isAuthorized(req, url)) {
     sendJson(res, 401, { error: "unauthorized" }, corsHeaders);
+    return;
+  }
+
+  if (url.pathname === "/mcp" && isRateLimited(getClientIp(req))) {
+    sendJson(
+      res,
+      429,
+      { error: "rate_limited", retry_after_seconds: 60 },
+      { ...corsHeaders, "retry-after": "60" },
+    );
     return;
   }
 
@@ -209,6 +279,16 @@ async function main() {
     console.error(
       `[acr-mcp-http] listening http://${host}:${actualPort}/mcp`,
     );
+    if (!(process.env.MCP_ACCESS_TOKEN || "").trim()) {
+      console.error(
+        "[acr-mcp-http] 경고: MCP_ACCESS_TOKEN이 설정되지 않아 누구나 접근할 수 있습니다. 공개 배포 시 반드시 설정하세요.",
+      );
+    }
+    if (isTruthyEnv("MCP_ENABLE_MUTATING_TOOLS")) {
+      console.error(
+        "[acr-mcp-http] 주의: MCP_ENABLE_MUTATING_TOOLS=1 — 다운로드·색인 도구가 HTTP로 노출됩니다.",
+      );
+    }
   });
 }
 
