@@ -4,7 +4,12 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { geminiEmbed, l2Normalize, dot } from "./gemini-embed.mjs";
+import {
+  geminiEmbed,
+  l2Normalize,
+  dot,
+  decodeEmbeddingBase64,
+} from "./gemini-embed.mjs";
 
 /**
  * @typedef {{ manifest: object, items: Array<Record<string, unknown>> }} AcrSemanticIndex
@@ -19,6 +24,17 @@ export async function loadSemanticIndex(indexPath) {
   const { manifest, items } = JSON.parse(raw);
   if (!Array.isArray(items)) {
     throw new Error("semantic index: items가 배열이 아닙니다.");
+  }
+  // 구버전(숫자 배열)과 신버전(embedding_b64) 인덱스를 모두 지원한다.
+  for (const it of items) {
+    if (
+      it &&
+      !Array.isArray(it.embedding) &&
+      typeof it.embedding_b64 === "string"
+    ) {
+      it.embedding = decodeEmbeddingBase64(it.embedding_b64);
+      delete it.embedding_b64;
+    }
   }
   return { manifest: manifest ?? {}, items };
 }
@@ -75,11 +91,12 @@ export async function searchSimilarFromIndex(opts) {
   const scored = [];
   for (const it of items) {
     const v = it.embedding;
-    if (!Array.isArray(v) || v.length !== qVec.length) {
+    const isVector = Array.isArray(v) || v instanceof Float32Array;
+    if (!isVector || v.length !== qVec.length) {
       if (typeof onDimensionMismatch === "function") {
         onDimensionMismatch({
           id: String(it?.id ?? ""),
-          indexLen: Array.isArray(v) ? v.length : -1,
+          indexLen: isVector ? v.length : -1,
           queryLen: qVec.length,
         });
       }

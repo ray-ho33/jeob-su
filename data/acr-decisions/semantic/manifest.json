@@ -9,5 +9,6 @@
   "indexed": 638,
   "skipped": 0,
   "errors": 0,
-  "outputDimensionality": null
+  "outputDimensionality": null,
+  "embeddingEncoding": "float32-base64-le"
 }

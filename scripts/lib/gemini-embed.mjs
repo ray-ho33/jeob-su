@@ -84,6 +84,27 @@ export async function geminiEmbed(text, opts, config = {}) {
   throw lastErr || new Error("Gemini embedContent: 재시도 초과");
 }
 
+/**
+ * Float32 리틀엔디언 base64 인코딩 — 텍스트 JSON 숫자 배열 대비 약 4배 작다.
+ * @param {ArrayLike<number>} vec
+ */
+export function encodeEmbeddingBase64(vec) {
+  const buf = Buffer.alloc(vec.length * 4);
+  for (let i = 0; i < vec.length; i++) buf.writeFloatLE(vec[i], i * 4);
+  return buf.toString("base64");
+}
+
+/**
+ * @param {string} b64
+ * @returns {Float32Array}
+ */
+export function decodeEmbeddingBase64(b64) {
+  const buf = Buffer.from(b64, "base64");
+  const out = new Float32Array(Math.floor(buf.length / 4));
+  for (let i = 0; i < out.length; i++) out[i] = buf.readFloatLE(i * 4);
+  return out;
+}
+
 export function l2Normalize(vec) {
   let s = 0;
   for (let i = 0; i < vec.length; i++) s += vec[i] * vec[i];

@@ -8,6 +8,7 @@ import {
   getGeminiApiKey,
   geminiEmbed,
   l2Normalize,
+  encodeEmbeddingBase64,
 } from "./gemini-embed.mjs";
 
 const MAX_REASON_CHARS = 10_000;
@@ -82,6 +83,7 @@ export async function buildSemanticIndex(opts) {
   const items = [];
   let skipped = 0;
   let errors = 0;
+  let embeddingDim = 0;
 
   for (let i = 0; i < todo.length; i++) {
     const file = todo[i];
@@ -133,11 +135,12 @@ export async function buildSemanticIndex(opts) {
     }
 
     const normalized = l2Normalize(vec);
+    if (!embeddingDim) embeddingDim = normalized.length;
     items.push({
       id,
       file: path.relative(root, fp).split(path.sep).join("/"),
       preview: previewFrom(decision),
-      embedding: normalized,
+      embedding_b64: encodeEmbeddingBase64(normalized),
     });
 
     if ((i + 1) % 20 === 0) log(`… ${i + 1}/${todo.length}건`);
@@ -148,7 +151,8 @@ export async function buildSemanticIndex(opts) {
     provider: "google-gemini",
     model: embedModel,
     taskTypeDocument: "RETRIEVAL_DOCUMENT",
-    dim: items[0]?.embedding?.length ?? 0,
+    embeddingEncoding: "float32-base64-le",
+    dim: embeddingDim,
     createdAt: new Date().toISOString(),
     sourceDir: path.relative(root, textDir).split(path.sep).join("/"),
     totalFiles: names.length,
