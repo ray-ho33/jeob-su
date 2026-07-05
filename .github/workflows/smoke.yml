@@ -1,0 +1,31 @@
+name: Smoke
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  smoke:
+    name: MCP smoke tests (no API keys)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: stdio MCP smoke
+        run: node scripts/smoke-acr-mcp.mjs
+
+      - name: HTTP MCP smoke
+        run: node scripts/smoke-acr-mcp-http.mjs
+
+      - name: Semantic pipeline structural smoke
+        run: node scripts/smoke-acr-semantic.mjs

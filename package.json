@@ -1,0 +1,16 @@
+{
+  "name": "jeob-su",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "국민권익위원회 의결례 시맨틱 검색 MCP 서버 (외부 npm 의존성 없음)",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node scripts/acr-mcp-http-server.mjs",
+    "start:stdio": "node scripts/acr-mcp-stdio-server.mjs",
+    "setup": "node scripts/setup-acr-semantic.mjs",
+    "test": "node scripts/smoke-acr-mcp.mjs && node scripts/smoke-acr-mcp-http.mjs && node scripts/smoke-acr-semantic.mjs"
+  }
+}
