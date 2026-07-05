@@ -60,7 +60,7 @@
 ## 요구 사항
 
 - **Node.js 18+** (ESM, `fetch` 사용)
-- **npm 의존성 없음** — `package.json` 없이 저장소의 `.mjs`만 실행합니다.
+- **외부 npm 의존성 없음** — `npm install` 없이 저장소의 `.mjs`만 실행합니다. `package.json`은 `npm test`·`npm start` 같은 스크립트 단축용입니다.
 
 ---
 
@@ -83,8 +83,10 @@ cp .env.example .env   # 키 입력 후 저장
 | `GEMINI_API_KEY` 또는 `GOOGLE_API_KEY` | Google AI Studio — **색인·검색** |
 | `PORT`                                | HTTP MCP 서버 포트, 기본 `3000` |
 | `HOST`                                | HTTP MCP 서버 바인딩 주소, 기본 `0.0.0.0` |
-| `MCP_ACCESS_TOKEN`                    | 선택: 공개 HTTP MCP 서버 접근 토큰 |
+| `MCP_ACCESS_TOKEN`                    | 선택: 공개 HTTP MCP 서버 접근 토큰. **공개 배포 시 필수 권장** — 없으면 누구나 접근 가능 |
 | `MCP_ALLOWED_ORIGINS`                 | 선택: 추가 허용 Origin 목록, 쉼표로 구분 |
+| `MCP_ENABLE_MUTATING_TOOLS`           | 선택: `1`이면 HTTP에서도 다운로드·색인 도구 노출 (기본 비활성) |
+| `MCP_RATE_LIMIT`                      | 선택: HTTP `/mcp` IP당 분당 요청 상한, 기본 `60`, `0`이면 해제 |
 
 
 발급 안내: [법제처 오픈API](https://open.law.go.kr/LSO/openApi/guideResult.do) · [Google AI Studio API 키](https://aistudio.google.com/app/apikey)
@@ -140,8 +142,10 @@ echo "민원 본문" | node scripts/query-acr-semantic.mjs --format md
 ### 점검용 스모크
 
 ```bash
-node scripts/smoke-acr-semantic.mjs
+npm test   # 스모크 3종 (stdio MCP · HTTP MCP · 시맨틱 구조) — API 키 불필요
 ```
+
+개별 실행: `node scripts/smoke-acr-mcp.mjs`, `node scripts/smoke-acr-mcp-http.mjs`, `node scripts/smoke-acr-semantic.mjs`. Gemini 키가 설정되어 있으면 `smoke-acr-semantic.mjs`는 임시 디렉터리에 3건짜리 색인을 빌드해 실제 검색까지 확인합니다(소량 API 호출 발생). `main` push·PR 시 GitHub Actions([smoke.yml](.github/workflows/smoke.yml))에서도 자동 실행됩니다.
 
 ### MCP 서버(stdio)
 
@@ -181,7 +185,9 @@ Claude.ai 웹의 **커스텀 커넥터**는 위의 stdio 설정처럼 내 컴퓨
 - **실행 파일**: [scripts/acr-mcp-http-server.mjs](scripts/acr-mcp-http-server.mjs)
 - **MCP URL**: `http://localhost:3000/mcp` (로컬 테스트용)
 - **상태 확인 URL**: `http://localhost:3000/health`
-- **도구**: stdio MCP와 동일한 `health_check`, `search_similar_decisions`, `get_decision_detail`, `get_citation_pack`, `ensure_semantic_corpus`, `download_acr_decisions`, `build_semantic_index`
+- **도구(기본)**: 읽기 전용 4종 — `health_check`, `search_similar_decisions`, `get_decision_detail`, `get_citation_pack`
+- **도구(선택)**: `MCP_ENABLE_MUTATING_TOOLS=1`로 실행하면 `ensure_semantic_corpus`, `download_acr_decisions`, `build_semantic_index`도 노출됩니다. 이때 HTTP에서는 장시간 실행 방지를 위해 `max_pages`·`limit`·`build_limit` 같은 상한 인수가 필수입니다. 전체 다운로드·전체 재색인은 로컬 CLI(`node scripts/setup-acr-semantic.mjs`)를 사용하세요.
+- **레이트 리밋**: `/mcp`는 IP당 분당 `MCP_RATE_LIMIT`(기본 60)회로 제한됩니다.
 
 로컬에서 실행:
 
@@ -305,6 +311,7 @@ https://jeob-su-acr-mcp.fly.dev/mcp?token=원하는_접근_토큰
 - **데이터**: 법제처 Open API — 국민권익위원회 의결서(JSON).
 - **임베딩**: Gemini `embedContent`, 모델 기본값 `gemini-embedding-001` (문서: `RETRIEVAL_DOCUMENT`, 질의: `RETRIEVAL_QUERY`).
 - **유사도**: 벡터 L2 정규화 후 내적(코사인과 동치).
+- **색인 저장 형식**: 임베딩은 base64 Float32(`embedding_b64`)로 저장해 숫자 배열 JSON 대비 약 4배 작습니다. 구버전(숫자 배열) 색인도 그대로 읽히며, `node scripts/compact-acr-index.mjs`로 API 호출 없이 변환할 수 있습니다.
 
 ---
 
@@ -320,7 +327,8 @@ scripts/
   acr-mcp-http-server.mjs        # MCP HTTP 서버(Claude.ai 커넥터용)
   smoke-acr-semantic.mjs
   smoke-acr-mcp.mjs              # MCP 라이프사이클·health 무키 스모크
-  smoke-acr-mcp-http.mjs         # HTTP MCP 라이프사이클·health 무키 스모크
+  smoke-acr-mcp-http.mjs         # HTTP MCP 라이프사이클·health·인증 무키 스모크
+  compact-acr-index.mjs          # 구버전 색인 → base64 Float32 변환 (API 불필요)
   lib/
     acr-download.mjs             # download_acr_decisions
     acr-index-build.mjs          # build_semantic_index
